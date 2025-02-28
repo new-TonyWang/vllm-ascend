@@ -17,6 +17,7 @@
 
 import os
 from typing import TYPE_CHECKING, Optional, Tuple
+import vllm.envs as envs
 
 import torch
 
@@ -56,7 +57,8 @@ class NPUPlatform(Platform):
     simple_compile_backend: str = "npu"
     ray_device_key: str = "NPU"
     device_control_env_var: str = "ASCEND_RT_VISIBLE_DEVICES"
-
+    # dispatch_key: str = "NPU"
+    
     supported_quantization: list[str] = [
         "ascend"
     ]
@@ -102,10 +104,18 @@ class NPUPlatform(Platform):
 
         parallel_config = vllm_config.parallel_config
         if parallel_config.worker_cls == "auto":
-            parallel_config.worker_cls = "vllm_ascend.worker.NPUWorker"
+            if vllm_config.scheduler_config.is_multi_step:
+                parallel_config.worker_cls = "vllm_ascend.multi_step_worker.MultiStepWorker"
+            else:
+                if envs.VLLM_USE_V1:
+                    parallel_config.worker_cls = "vllm_ascend.v1.worker.worker.NPUWorker"
+                else:
+                    parallel_config.worker_cls = "vllm_ascend.worker.NPUWorker"
+
         cache_config = vllm_config.cache_config
+        vllm_config.scheduler_config.chunked_prefill_enabled = False
         if cache_config and cache_config.block_size is None:
-            cache_config.block_size = 16
+            cache_config.block_size = 128
 
     @classmethod
     def get_attn_backend_cls(cls, selected_backend, head_size, dtype,
